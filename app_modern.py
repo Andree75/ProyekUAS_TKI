@@ -1,0 +1,520 @@
+"""
+Aplikasi Streamlit: Sistem Pencarian Two-Stage Retrieval + Perbandingan terhadap Baseline VSM.
+Judul: Optimasi Pencarian Komentar Ketahanan Pangan berbasis Bi-Encoder IndoBERT
+       dengan Cosine Similarity dan Reranking Cross-Encoder terhadap Baseline VSM.
+"""
+import streamlit as st
+import pandas as pd
+import numpy as np
+
+# Modul Baseline (TF-IDF VSM)
+from src.engine import (
+    build_inverted_index, calculate_idf, calculate_tfidf_matrix,
+    vectorize_query, compute_cosine_similarity
+)
+
+# Modul Modern (Two-Stage Retrieval)
+from src.semantic_engine import BiEncoderRetriever
+from src.reranker import CrossEncoderReranker
+
+# Modul Evaluasi (Klasik + Modern)
+from src.evaluation import (
+    calculate_all_metrics, calculate_modern_metrics,
+    calculate_mrr, calculate_average_ndcg,
+    calculate_rr, calculate_ndcg
+)
+
+
+# ============================================================
+# 1. KONFIGURASI HALAMAN & ESTETIKA
+# ============================================================
+st.set_page_config(
+    page_title="IR Modern Search Engine",
+    page_icon="🔍",
+    layout="wide"
+)
+
+st.markdown("""
+<style>
+    /* === Variabel Warna === */
+    :root {
+        --primary: #1B5E20;
+        --primary-light: #4CAF50;
+        --primary-bg: #E8F5E9;
+        --accent-blue: #1565C0;
+        --accent-blue-light: #42A5F5;
+        --accent-blue-bg: #E3F2FD;
+        --text-dark: #333;
+        --text-muted: #777;
+        --card-shadow: 0 2px 12px rgba(0,0,0,0.06);
+    }
+
+    /* === Header === */
+    .title-box {
+        padding: 30px;
+        border: 2px solid var(--primary-light);
+        border-radius: 15px;
+        background: linear-gradient(135deg, #ffffff, var(--primary-bg));
+        text-align: center;
+        font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif;
+        box-shadow: 0 4px 15px rgba(46,125,50,0.15);
+        margin-bottom: 30px;
+    }
+    .title-box h1 { color: var(--primary); margin-bottom: 10px; font-weight: 800; font-size: 2.2rem; }
+    .title-box p  { font-size: 1.1rem; color: #555; }
+
+    /* === Kartu Dokumen (Hijau = Baseline, Biru = Modern) === */
+    .doc-card {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 6px solid var(--primary-light);
+        box-shadow: var(--card-shadow);
+        margin-bottom: 16px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .doc-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(46,125,50,0.12); }
+
+    .doc-card-modern {
+        background-color: white;
+        padding: 20px;
+        border-radius: 12px;
+        border-left: 6px solid var(--accent-blue-light);
+        box-shadow: var(--card-shadow);
+        margin-bottom: 16px;
+        transition: transform 0.2s ease, box-shadow 0.2s ease;
+    }
+    .doc-card-modern:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(21,101,192,0.12); }
+
+    /* === Badge Skor === */
+    .score-badge {
+        background-color: var(--primary-bg);
+        color: var(--primary);
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.85em;
+        border: 1px solid var(--primary-light);
+    }
+    .score-badge-blue {
+        background-color: var(--accent-blue-bg);
+        color: var(--accent-blue);
+        padding: 5px 14px;
+        border-radius: 20px;
+        font-weight: bold;
+        font-size: 0.85em;
+        border: 1px solid var(--accent-blue-light);
+    }
+
+    /* === Blok Laporan === */
+    .report-card {
+        background-color: #FAFAFA;
+        padding: 25px;
+        border-radius: 10px;
+        border: 1px solid #E0E0E0;
+        margin-bottom: 20px;
+    }
+
+    /* === Indikator Stage === */
+    .stage-label {
+        display: inline-block;
+        padding: 4px 12px;
+        border-radius: 6px;
+        font-size: 0.8em;
+        font-weight: 700;
+        margin-bottom: 8px;
+    }
+    .stage-1 { background: #FFF3E0; color: #E65100; }
+    .stage-2 { background: #E3F2FD; color: #1565C0; }
+</style>
+
+<div class="title-box">
+    <h1>Mesin Pencari Modern — Ketahanan Pangan 🌾</h1>
+    <p><b>Two-Stage Retrieval:</b> Bi-Encoder IndoBERT + Cross-Encoder Reranking</p>
+    <p style="font-size:0.9rem; color:#888;">Dikembangkan oleh <b>Andri Darmawan</b> (301210004) & <b>Muhammad Fakhrudin</b> (3012310043)</p>
+</div>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# 2. DATA LOADING
+# ============================================================
+@st.cache_data
+def load_data():
+    """Memuat data dari file Excel lokal."""
+    try:
+        df = pd.read_excel('hasil_vsm_ketahanan_pangan.xlsx')
+        if len(df.columns) >= 2:
+            df.columns = ['Komentar', 'Sumber'] + list(df.columns[2:])
+        else:
+            df.columns = ['Komentar']
+        df = df.dropna(subset=['Komentar']).reset_index(drop=True)
+        return df
+    except Exception as e:
+        st.error(f"Gagal memuat file Excel: {e}")
+        return pd.DataFrame({'Komentar': []})
+
+
+# ============================================================
+# 3. ENGINE INITIALIZATION
+# ============================================================
+
+# --- Baseline Engine (TF-IDF VSM) ---
+@st.cache_resource
+def prepare_baseline_engine(documents):
+    """Membangun Inverted Index, IDF, dan Matriks TF-IDF."""
+    if not documents:
+        return {}, {}, {}, np.array([]), []
+    total_docs = len(documents)
+    inverted_index, df_dict, processed_docs = build_inverted_index(documents)
+    idf_weights = calculate_idf(df_dict, total_docs)
+    doc_matrix, vocab = calculate_tfidf_matrix(inverted_index, idf_weights, total_docs)
+    return inverted_index, df_dict, idf_weights, doc_matrix, vocab
+
+# --- Modern Engine (Bi-Encoder + Cross-Encoder) ---
+@st.cache_resource
+def prepare_modern_engine(documents):
+    """Menginisialisasi Bi-Encoder IndoBERT dan Cross-Encoder Reranker."""
+    retriever = BiEncoderRetriever()
+    retriever.encode_documents(documents)
+    reranker = CrossEncoderReranker()
+    return retriever, reranker
+
+
+# Load data
+df = load_data()
+documents = df['Komentar'].astype(str).tolist()
+
+# Initialize engines
+with st.spinner('⏳ Menyiapkan Baseline Engine (TF-IDF, Inverted Index)...'):
+    inverted_index, df_dict, idf_weights, doc_matrix, vocab = prepare_baseline_engine(documents)
+
+with st.spinner('🧠 Menyiapkan Modern Engine (Bi-Encoder IndoBERT + Cross-Encoder)...'):
+    retriever, reranker = prepare_modern_engine(documents)
+
+
+# ============================================================
+# 4. FUNGSI HELPER PENCARIAN
+# ============================================================
+
+def search_baseline(query_text: str, top_k: int = 5) -> tuple[list[int], list[float]]:
+    """Jalankan pencarian Baseline VSM (TF-IDF + Cosine Similarity)."""
+    q_vector = vectorize_query(query_text, vocab, idf_weights)
+    scores = compute_cosine_similarity(doc_matrix, q_vector)
+    ranked_indices = scores.argsort()[::-1][:top_k]
+    ranked_scores = [float(scores[i]) for i in ranked_indices]
+    # Filter skor > 0 (pastikan ID dan skor tetap sinkron)
+    filtered = [(int(idx), s) for idx, s in zip(ranked_indices, ranked_scores) if s > 0]
+    if filtered:
+        result_ids, result_scores = zip(*filtered)
+        return list(result_ids), list(result_scores)
+    return [], []
+
+def search_modern(query_text: str, top_k_stage1: int = 15, top_k_final: int = 5) -> dict:
+    """
+    Jalankan pencarian Two-Stage (Bi-Encoder → Cross-Encoder).
+    Mengembalikan hasil Tahap 1 dan Tahap 2 secara terpisah untuk transparansi.
+    """
+    # Tahap 1: Bi-Encoder Retrieval
+    bi_ids, bi_scores = retriever.retrieve(query_text, top_k=top_k_stage1)
+    
+    # Tahap 2: Cross-Encoder Reranking
+    candidate_docs = [documents[i] for i in bi_ids]
+    final_ids, final_scores = reranker.rerank(
+        query_text, candidate_docs, bi_ids, top_k=top_k_final
+    )
+    
+    return {
+        'stage1_ids': bi_ids,
+        'stage1_scores': bi_scores,
+        'final_ids': final_ids,
+        'final_scores': final_scores,
+    }
+
+
+# ============================================================
+# 5. ANTARMUKA PENGGUNA (3 TAB)
+# ============================================================
+tab1, tab2, tab3 = st.tabs([
+    "🔍 Pencarian Modern",
+    "⚖️ Perbandingan Sistem",
+    "📊 Evaluasi Komparatif"
+])
+
+
+# ----------------------------------------------------------
+# TAB 1: PENCARIAN MODERN (Two-Stage Retrieval)
+# ----------------------------------------------------------
+with tab1:
+    st.markdown("### Pencarian Two-Stage Retrieval")
+    st.caption("Tahap 1: Bi-Encoder IndoBERT (Cosine Similarity) → Tahap 2: Cross-Encoder Reranking")
+
+    col_q, col_k = st.columns([3, 1])
+    with col_q:
+        query_modern = st.text_input(
+            "Masukkan Kueri:", 
+            placeholder="Contoh: harga beras stabil murah",
+            key="q_modern"
+        )
+    with col_k:
+        top_k_modern = st.slider("Jumlah Hasil Final:", 1, 10, 5, key="k_modern")
+
+    if query_modern:
+        with st.spinner('🔄 Menjalankan Two-Stage Retrieval...'):
+            results = search_modern(query_modern, top_k_stage1=15, top_k_final=top_k_modern)
+
+        # --- Tampilkan Hasil Tahap 1 (Bi-Encoder) ---
+        with st.expander("📋 Tahap 1: Kandidat Bi-Encoder (Top-15)", expanded=False):
+            st.markdown('<span class="stage-label stage-1">STAGE 1 — Bi-Encoder</span>', unsafe_allow_html=True)
+            for rank, (idx, score) in enumerate(zip(results['stage1_ids'], results['stage1_scores']), 1):
+                st.markdown(f"**#{rank}** | Doc ID: {idx} | Skor: `{score:.4f}` — _{df['Komentar'].iloc[idx][:80]}..._")
+
+        # --- Tampilkan Hasil Tahap 2 (Cross-Encoder) ---
+        st.markdown("---")
+        st.markdown("### Hasil Pencarian Final (Setelah Reranking)")
+
+        if not results['final_ids']:
+            st.warning("Tidak ditemukan dokumen relevan.")
+        else:
+            chart_data = {"Dokumen": [], "Skor": []}
+            for rank, (idx, score) in enumerate(zip(results['final_ids'], results['final_scores']), 1):
+                teks_asli = df['Komentar'].iloc[idx]
+                sumber = df.get('Sumber', pd.Series(['-'] * len(df))).iloc[idx]
+
+                chart_data["Dokumen"].append(f"Doc {idx}")
+                chart_data["Skor"].append(score)
+
+                st.markdown(f"""
+                    <div class="doc-card-modern">
+                        <span class="stage-label stage-2">FINAL — Cross-Encoder Reranked</span>
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0;">
+                            <h4 style="margin: 0; color: #1565C0;">Peringkat #{rank} | Dokumen ID: {idx}</h4>
+                            <span class="score-badge-blue">Skor Relevansi: {score:.4f}</span>
+                        </div>
+                        <p style="font-size: 1.05em; line-height: 1.5; color: #444;">"{teks_asli}"</p>
+                        <small style="color: #888;"><b>Sumber:</b> {sumber}</small>
+                    </div>
+                """, unsafe_allow_html=True)
+
+            st.markdown("### Visualisasi Skor")
+            df_chart = pd.DataFrame(chart_data).set_index("Dokumen")
+            st.bar_chart(df_chart, use_container_width=True, color="#42A5F5")
+
+
+# ----------------------------------------------------------
+# TAB 2: PERBANDINGAN BASELINE vs MODERN
+# ----------------------------------------------------------
+with tab2:
+    st.markdown("### Perbandingan: Baseline VSM vs Two-Stage Retrieval")
+    st.caption("Masukkan kueri yang sama untuk melihat perbedaan hasil kedua sistem secara berdampingan.")
+
+    query_compare = st.text_input(
+        "Masukkan Kueri untuk Perbandingan:",
+        placeholder="Contoh: stabilitas pasokan pangan",
+        key="q_compare"
+    )
+    top_k_compare = st.slider("Jumlah Hasil per Sistem:", 1, 10, 5, key="k_compare")
+
+    if query_compare:
+        with st.spinner('🔄 Menjalankan kedua sistem...'):
+            baseline_ids, baseline_scores = search_baseline(query_compare, top_k=top_k_compare)
+            modern_results = search_modern(query_compare, top_k_stage1=15, top_k_final=top_k_compare)
+
+        col_baseline, col_modern = st.columns(2)
+
+        # --- Kolom Kiri: Baseline VSM ---
+        with col_baseline:
+            st.markdown("#### 🟢 Baseline VSM (TF-IDF)")
+            if not baseline_ids:
+                st.warning("Tidak ditemukan dokumen relevan.")
+            else:
+                for rank, (idx, score) in enumerate(zip(baseline_ids, baseline_scores), 1):
+                    teks = df['Komentar'].iloc[idx]
+                    st.markdown(f"""
+                        <div class="doc-card">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <b style="color: #2E7D32;">#{rank} | Doc {idx}</b>
+                                <span class="score-badge">{score:.4f}</span>
+                            </div>
+                            <p style="font-size: 0.95em; color: #444;">"{teks}"</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+        # --- Kolom Kanan: Modern Two-Stage ---
+        with col_modern:
+            st.markdown("#### 🔵 Modern Two-Stage (IndoBERT + Cross-Encoder)")
+            if not modern_results['final_ids']:
+                st.warning("Tidak ditemukan dokumen relevan.")
+            else:
+                for rank, (idx, score) in enumerate(zip(modern_results['final_ids'], modern_results['final_scores']), 1):
+                    teks = df['Komentar'].iloc[idx]
+                    st.markdown(f"""
+                        <div class="doc-card-modern">
+                            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                <b style="color: #1565C0;">#{rank} | Doc {idx}</b>
+                                <span class="score-badge-blue">{score:.4f}</span>
+                            </div>
+                            <p style="font-size: 0.95em; color: #444;">"{teks}"</p>
+                        </div>
+                    """, unsafe_allow_html=True)
+
+        # --- Tabel Perbandingan Peringkat ---
+        st.markdown("---")
+        st.markdown("#### Tabel Perbandingan Urutan Peringkat")
+        max_rows = max(len(baseline_ids), len(modern_results['final_ids']))
+        comparison_data = []
+        for i in range(max_rows):
+            row = {"Peringkat": i + 1}
+            if i < len(baseline_ids):
+                row["Baseline Doc ID"] = baseline_ids[i]
+                row["Baseline Skor"] = f"{baseline_scores[i]:.4f}"
+            else:
+                row["Baseline Doc ID"] = "-"
+                row["Baseline Skor"] = "-"
+            if i < len(modern_results['final_ids']):
+                row["Modern Doc ID"] = modern_results['final_ids'][i]
+                row["Modern Skor"] = f"{modern_results['final_scores'][i]:.4f}"
+            else:
+                row["Modern Doc ID"] = "-"
+                row["Modern Skor"] = "-"
+            comparison_data.append(row)
+        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+
+
+# ----------------------------------------------------------
+# TAB 3: EVALUASI KOMPARATIF (MRR & NDCG)
+# ----------------------------------------------------------
+with tab3:
+    st.markdown("### Evaluasi Komparatif: Baseline VSM vs Two-Stage Retrieval")
+    st.markdown("""
+    <div class="report-card">
+        <b>Mekanisme Evaluasi:</b><br>
+        1. Tentukan minimal 5 skenario kueri uji.<br>
+        2. Untuk setiap kueri, tentukan <i>Ground Truth</i> (ID dokumen yang benar-benar relevan).<br>
+        3. Jalankan kedua sistem pada kueri yang sama.<br>
+        4. Hitung metrik <b>MRR</b> dan <b>NDCG</b> untuk masing-masing sistem.<br>
+        5. Bandingkan hasilnya secara kuantitatif.
+    </div>
+    """, unsafe_allow_html=True)
+
+    # --- Definisi Skenario Evaluasi ---
+    st.subheader("Definisi Skenario Kueri & Ground Truth")
+    st.caption("Masukkan minimal 5 kueri uji. Untuk setiap kueri, tentukan ID dokumen relevan (ground truth).")
+
+    num_scenarios = st.number_input("Jumlah Skenario Kueri:", min_value=5, max_value=10, value=5, step=1)
+    
+    # Default kueri dan ground truth untuk contoh awal
+    default_queries = [
+        "harga beras murah", 
+        "stabilitas pasokan pangan",
+        "kemenko pangan kebijakan",
+        "stok beras aman",
+        "petani kesejahteraan rakyat",
+    ]
+    default_gts = ["26, 41", "3, 4", "3, 7, 8, 47", "2, 5, 8, 9", "0, 6"]
+
+    scenarios = []
+    for i in range(num_scenarios):
+        col_q, col_gt = st.columns([2, 1])
+        default_q = default_queries[i] if i < len(default_queries) else ""
+        default_gt = default_gts[i] if i < len(default_gts) else ""
+        with col_q:
+            q = st.text_input(f"Kueri Skenario {i+1}:", value=default_q, key=f"eval_q_{i}")
+        with col_gt:
+            gt = st.text_input(f"Ground Truth {i+1} (ID, pisah koma):", value=default_gt, key=f"eval_gt_{i}")
+        scenarios.append((q, gt))
+
+    st.markdown("---")
+
+    # --- Tombol Jalankan Evaluasi ---
+    if st.button("🚀 Jalankan Evaluasi Komparatif", use_container_width=True):
+        valid_scenarios = [
+            (q, gt) for q, gt in scenarios 
+            if q.strip() and gt.strip()
+        ]
+
+        if len(valid_scenarios) < 5:
+            st.error("Minimal 5 skenario kueri dengan ground truth yang valid diperlukan.")
+        else:
+            with st.spinner("⏳ Menjalankan evaluasi pada kedua sistem..."):
+                # Kumpulkan hasil kedua sistem
+                all_baseline_retrieved = []
+                all_modern_retrieved = []
+                all_ground_truths = []
+                detail_rows = []
+
+                for i, (q, gt_str) in enumerate(valid_scenarios, 1):
+                    gt_ids = [int(x.strip()) for x in gt_str.split(',') if x.strip().isdigit()]
+                    all_ground_truths.append(gt_ids)
+
+                    # Baseline
+                    b_ids, b_scores = search_baseline(q, top_k=5)
+                    all_baseline_retrieved.append(b_ids)
+
+                    # Modern
+                    m_results = search_modern(q, top_k_stage1=15, top_k_final=5)
+                    m_ids = m_results['final_ids']
+                    all_modern_retrieved.append(m_ids)
+
+                    # Metrik per kueri
+                    b_metrics = calculate_modern_metrics(b_ids, gt_ids, k=5)
+                    m_metrics = calculate_modern_metrics(m_ids, gt_ids, k=5)
+
+                    detail_rows.append({
+                        "Skenario": f"Q{i}",
+                        "Kueri": q,
+                        "Ground Truth": str(gt_ids),
+                        "Baseline RR": f"{b_metrics['rr']:.4f}",
+                        "Baseline NDCG@5": f"{b_metrics['ndcg']:.4f}",
+                        "Modern RR": f"{m_metrics['rr']:.4f}",
+                        "Modern NDCG@5": f"{m_metrics['ndcg']:.4f}",
+                    })
+
+                # Hitung MRR dan Avg NDCG keseluruhan
+                baseline_mrr = calculate_mrr(all_baseline_retrieved, all_ground_truths)
+                modern_mrr = calculate_mrr(all_modern_retrieved, all_ground_truths)
+                baseline_ndcg = calculate_average_ndcg(all_baseline_retrieved, all_ground_truths, k=5)
+                modern_ndcg = calculate_average_ndcg(all_modern_retrieved, all_ground_truths, k=5)
+
+            # --- Tampilkan Hasil ---
+            st.markdown("#### Detail Evaluasi Per Kueri")
+            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+
+            st.markdown("---")
+            st.markdown("#### Ringkasan Metrik Keseluruhan")
+
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                st.metric(label="🟢 Baseline MRR", value=f"{baseline_mrr:.4f}")
+                st.metric(label="🟢 Baseline Avg NDCG@5", value=f"{baseline_ndcg:.4f}")
+            with col_m2:
+                mrr_delta = modern_mrr - baseline_mrr
+                ndcg_delta = modern_ndcg - baseline_ndcg
+                st.metric(label="🔵 Modern MRR", value=f"{modern_mrr:.4f}", delta=f"{mrr_delta:+.4f}")
+                st.metric(label="🔵 Modern Avg NDCG@5", value=f"{modern_ndcg:.4f}", delta=f"{ndcg_delta:+.4f}")
+
+            # Kesimpulan otomatis
+            st.markdown("---")
+            st.markdown("#### Kesimpulan Evaluasi")
+            if modern_mrr > baseline_mrr and modern_ndcg > baseline_ndcg:
+                st.success(
+                    f"✅ **Sistem Modern (Two-Stage Retrieval) mengungguli Baseline VSM** pada kedua metrik. "
+                    f"MRR meningkat **{mrr_delta:+.4f}** dan NDCG@5 meningkat **{ndcg_delta:+.4f}**. "
+                    f"Hal ini membuktikan bahwa pendekatan Semantic Search dengan Bi-Encoder IndoBERT "
+                    f"dan Reranking Cross-Encoder berhasil mengatasi masalah *vocabulary mismatch* "
+                    f"pada metode TF-IDF tradisional."
+                )
+            elif modern_mrr > baseline_mrr or modern_ndcg > baseline_ndcg:
+                st.info(
+                    f"⚠️ **Sistem Modern mengungguli Baseline pada sebagian metrik.** "
+                    f"MRR: {baseline_mrr:.4f} → {modern_mrr:.4f} ({mrr_delta:+.4f}). "
+                    f"NDCG@5: {baseline_ndcg:.4f} → {modern_ndcg:.4f} ({ndcg_delta:+.4f}). "
+                    f"Perlu analisis lebih lanjut terhadap skenario kueri dan kualitas ground truth."
+                )
+            else:
+                st.warning(
+                    f"⚠️ **Baseline VSM masih setara atau lebih baik pada metrik ini.** "
+                    f"Kemungkinan penyebab: ground truth kurang representatif, "
+                    f"atau dataset terlalu kecil (50 dokumen) sehingga TF-IDF masih cukup efektif. "
+                    f"Disarankan untuk memperbanyak kueri uji dan memperbaiki anotasi ground truth."
+                )

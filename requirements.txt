@@ -1,0 +1,12 @@
+# Dependencies untuk proyek IR Modern
+# Baseline (sudah terinstall)
+streamlit
+pandas
+numpy
+openpyxl
+Sastrawi
+
+# Sistem Baru (Two-Stage Retrieval)
+sentence-transformers
+scikit-learn
+torch
