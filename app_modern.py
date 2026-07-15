@@ -36,17 +36,13 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-    /* === Variabel Warna === */
+    /* === Variabel Warna (Mendukung Dark/Light Mode Streamlit) === */
     :root {
-        --primary: #1B5E20;
         --primary-light: #4CAF50;
-        --primary-bg: #E8F5E9;
-        --accent-blue: #1565C0;
+        --primary-bg: rgba(76, 175, 80, 0.15);
         --accent-blue-light: #42A5F5;
-        --accent-blue-bg: #E3F2FD;
-        --text-dark: #333;
-        --text-muted: #777;
-        --card-shadow: 0 2px 12px rgba(0,0,0,0.06);
+        --accent-blue-bg: rgba(33, 150, 243, 0.15);
+        --card-shadow: 0 4px 6px rgba(0,0,0,0.1);
     }
 
     /* === Header === */
@@ -54,18 +50,18 @@ st.markdown("""
         padding: 30px;
         border: 2px solid var(--primary-light);
         border-radius: 15px;
-        background: linear-gradient(135deg, #ffffff, var(--primary-bg));
+        background-color: var(--secondary-background-color);
         text-align: center;
         font-family: 'Inter', 'Segoe UI', Tahoma, sans-serif;
-        box-shadow: 0 4px 15px rgba(46,125,50,0.15);
+        box-shadow: var(--card-shadow);
         margin-bottom: 30px;
     }
-    .title-box h1 { color: var(--primary); margin-bottom: 10px; font-weight: 800; font-size: 2.2rem; }
-    .title-box p  { font-size: 1.1rem; color: #555; }
+    .title-box h1 { color: var(--primary-color, var(--primary-light)); margin-bottom: 10px; font-weight: 800; font-size: 2.2rem; }
+    .title-box p  { font-size: 1.1rem; opacity: 0.8; }
 
-    /* === Kartu Dokumen (Hijau = Baseline, Biru = Modern) === */
+    /* === Kartu Dokumen === */
     .doc-card {
-        background-color: white;
+        background-color: var(--secondary-background-color);
         padding: 20px;
         border-radius: 12px;
         border-left: 6px solid var(--primary-light);
@@ -73,10 +69,10 @@ st.markdown("""
         margin-bottom: 16px;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    .doc-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(46,125,50,0.12); }
+    .doc-card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(76,175,80,0.2); }
 
     .doc-card-modern {
-        background-color: white;
+        background-color: var(--secondary-background-color);
         padding: 20px;
         border-radius: 12px;
         border-left: 6px solid var(--accent-blue-light);
@@ -84,12 +80,12 @@ st.markdown("""
         margin-bottom: 16px;
         transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
-    .doc-card-modern:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(21,101,192,0.12); }
+    .doc-card-modern:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(33,150,243,0.2); }
 
     /* === Badge Skor === */
     .score-badge {
         background-color: var(--primary-bg);
-        color: var(--primary);
+        color: var(--primary-light);
         padding: 5px 14px;
         border-radius: 20px;
         font-weight: bold;
@@ -98,7 +94,7 @@ st.markdown("""
     }
     .score-badge-blue {
         background-color: var(--accent-blue-bg);
-        color: var(--accent-blue);
+        color: var(--accent-blue-light);
         padding: 5px 14px;
         border-radius: 20px;
         font-weight: bold;
@@ -108,10 +104,11 @@ st.markdown("""
 
     /* === Blok Laporan === */
     .report-card {
-        background-color: #FAFAFA;
+        background-color: var(--secondary-background-color);
+        color: var(--text-color);
         padding: 25px;
         border-radius: 10px;
-        border: 1px solid #E0E0E0;
+        border: 1px solid rgba(128, 128, 128, 0.2);
         margin-bottom: 20px;
     }
 
@@ -124,14 +121,14 @@ st.markdown("""
         font-weight: 700;
         margin-bottom: 8px;
     }
-    .stage-1 { background: #FFF3E0; color: #E65100; }
-    .stage-2 { background: #E3F2FD; color: #1565C0; }
+    .stage-1 { background: rgba(255, 152, 0, 0.15); color: #FF9800; border: 1px solid rgba(255,152,0,0.3); }
+    .stage-2 { background: var(--accent-blue-bg); color: var(--accent-blue-light); border: 1px solid rgba(33,150,243,0.3); }
 </style>
 
 <div class="title-box">
     <h1>Mesin Pencari Modern — Ketahanan Pangan 🌾</h1>
     <p><b>Two-Stage Retrieval:</b> Bi-Encoder IndoBERT + Cross-Encoder Reranking</p>
-    <p style="font-size:0.9rem; color:#888;">Dikembangkan oleh <b>Andri Darmawan</b> (301210004) & <b>Muhammad Fakhrudin</b> (3012310043)</p>
+    <p style="font-size:0.9rem; opacity:0.7;">Dikembangkan oleh <b>Andri Darmawan</b> (301210004) & <b>Muhammad Fakhrudin</b> (3012310043)</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -288,11 +285,11 @@ with tab1:
                     <div class="doc-card-modern">
                         <span class="stage-label stage-2">FINAL — Cross-Encoder Reranked</span>
                         <div style="display: flex; justify-content: space-between; align-items: center; margin: 8px 0;">
-                            <h4 style="margin: 0; color: #1565C0;">Peringkat #{rank} | Dokumen ID: {idx}</h4>
+                            <h4 style="margin: 0; color: var(--accent-blue-light);">Peringkat #{rank} | Dokumen ID: {idx}</h4>
                             <span class="score-badge-blue">Skor Relevansi: {score:.4f}</span>
                         </div>
-                        <p style="font-size: 1.05em; line-height: 1.5; color: #444;">"{teks_asli}"</p>
-                        <small style="color: #888;"><b>Sumber:</b> {sumber}</small>
+                        <p style="font-size: 1.05em; line-height: 1.5; color: var(--text-color);">"{teks_asli}"</p>
+                        <small style="opacity: 0.7;"><b>Sumber:</b> {sumber}</small>
                     </div>
                 """, unsafe_allow_html=True)
 
@@ -333,10 +330,10 @@ with tab2:
                     st.markdown(f"""
                         <div class="doc-card">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <b style="color: #2E7D32;">#{rank} | Doc {idx}</b>
+                                <b style="color: var(--primary-light);">#{rank} | Doc {idx}</b>
                                 <span class="score-badge">{score:.4f}</span>
                             </div>
-                            <p style="font-size: 0.95em; color: #444;">"{teks}"</p>
+                            <p style="font-size: 0.95em; color: var(--text-color);">"{teks}"</p>
                         </div>
                     """, unsafe_allow_html=True)
 
@@ -351,10 +348,10 @@ with tab2:
                     st.markdown(f"""
                         <div class="doc-card-modern">
                             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                                <b style="color: #1565C0;">#{rank} | Doc {idx}</b>
+                                <b style="color: var(--accent-blue-light);">#{rank} | Doc {idx}</b>
                                 <span class="score-badge-blue">{score:.4f}</span>
                             </div>
-                            <p style="font-size: 0.95em; color: #444;">"{teks}"</p>
+                            <p style="font-size: 0.95em; color: var(--text-color);">"{teks}"</p>
                         </div>
                     """, unsafe_allow_html=True)
 
