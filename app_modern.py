@@ -312,15 +312,57 @@ with tab2:
     )
     top_k_compare = st.slider("Jumlah Hasil per Sistem:", 1, 10, 5, key="k_compare")
 
+    pilihan_tampilan = st.radio(
+        "Pilih Sistem yang Ditampilkan:",
+        options=["Keduanya (Berdampingan)", "Hanya Baseline VSM (TF-IDF)", "Hanya Modern Two-Stage"],
+        horizontal=True
+    )
+
     if query_compare:
-        with st.spinner('🔄 Menjalankan kedua sistem...'):
+        with st.spinner('🔄 Menjalankan sistem...'):
             baseline_ids, baseline_scores = search_baseline(query_compare, top_k=top_k_compare)
             modern_results = search_modern(query_compare, top_k_stage1=15, top_k_final=top_k_compare)
 
-        col_baseline, col_modern = st.columns(2)
+        if pilihan_tampilan == "Keduanya (Berdampingan)":
+            col_baseline, col_modern = st.columns(2)
+            
+            # --- Kolom Kiri: Baseline VSM ---
+            with col_baseline:
+                st.markdown("#### 🟢 Baseline VSM (TF-IDF)")
+                if not baseline_ids:
+                    st.warning("Tidak ditemukan dokumen relevan.")
+                else:
+                    for rank, (idx, score) in enumerate(zip(baseline_ids, baseline_scores), 1):
+                        teks = df['Komentar'].iloc[idx]
+                        st.markdown(f"""
+                            <div class="doc-card">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <b style="color: var(--primary-light);">#{rank} | Doc {idx}</b>
+                                    <span class="score-badge">{score:.4f}</span>
+                                </div>
+                                <p style="font-size: 0.95em; color: var(--text-color);">"{teks}"</p>
+                            </div>
+                        """, unsafe_allow_html=True)
 
-        # --- Kolom Kiri: Baseline VSM ---
-        with col_baseline:
+            # --- Kolom Kanan: Modern Two-Stage ---
+            with col_modern:
+                st.markdown("#### 🔵 Modern Two-Stage (IndoBERT + Cross-Encoder)")
+                if not modern_results['final_ids']:
+                    st.warning("Tidak ditemukan dokumen relevan.")
+                else:
+                    for rank, (idx, score) in enumerate(zip(modern_results['final_ids'], modern_results['final_scores']), 1):
+                        teks = df['Komentar'].iloc[idx]
+                        st.markdown(f"""
+                            <div class="doc-card-modern">
+                                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                    <b style="color: var(--accent-blue-light);">#{rank} | Doc {idx}</b>
+                                    <span class="score-badge-blue">{score:.4f}</span>
+                                </div>
+                                <p style="font-size: 0.95em; color: var(--text-color);">"{teks}"</p>
+                            </div>
+                        """, unsafe_allow_html=True)
+
+        elif pilihan_tampilan == "Hanya Baseline VSM (TF-IDF)":
             st.markdown("#### 🟢 Baseline VSM (TF-IDF)")
             if not baseline_ids:
                 st.warning("Tidak ditemukan dokumen relevan.")
@@ -337,8 +379,7 @@ with tab2:
                         </div>
                     """, unsafe_allow_html=True)
 
-        # --- Kolom Kanan: Modern Two-Stage ---
-        with col_modern:
+        elif pilihan_tampilan == "Hanya Modern Two-Stage":
             st.markdown("#### 🔵 Modern Two-Stage (IndoBERT + Cross-Encoder)")
             if not modern_results['final_ids']:
                 st.warning("Tidak ditemukan dokumen relevan.")
@@ -356,26 +397,27 @@ with tab2:
                     """, unsafe_allow_html=True)
 
         # --- Tabel Perbandingan Peringkat ---
-        st.markdown("---")
-        st.markdown("#### Tabel Perbandingan Urutan Peringkat")
-        max_rows = max(len(baseline_ids), len(modern_results['final_ids']))
-        comparison_data = []
-        for i in range(max_rows):
-            row = {"Peringkat": i + 1}
-            if i < len(baseline_ids):
-                row["Baseline Doc ID"] = baseline_ids[i]
-                row["Baseline Skor"] = f"{baseline_scores[i]:.4f}"
-            else:
-                row["Baseline Doc ID"] = "-"
-                row["Baseline Skor"] = "-"
-            if i < len(modern_results['final_ids']):
-                row["Modern Doc ID"] = modern_results['final_ids'][i]
-                row["Modern Skor"] = f"{modern_results['final_scores'][i]:.4f}"
-            else:
-                row["Modern Doc ID"] = "-"
-                row["Modern Skor"] = "-"
-            comparison_data.append(row)
-        st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
+        if pilihan_tampilan == "Keduanya (Berdampingan)":
+            st.markdown("---")
+            st.markdown("#### Tabel Perbandingan Urutan Peringkat")
+            max_rows = max(len(baseline_ids), len(modern_results['final_ids']))
+            comparison_data = []
+            for i in range(max_rows):
+                row = {"Peringkat": i + 1}
+                if i < len(baseline_ids):
+                    row["Baseline Doc ID"] = baseline_ids[i]
+                    row["Baseline Skor"] = f"{baseline_scores[i]:.4f}"
+                else:
+                    row["Baseline Doc ID"] = "-"
+                    row["Baseline Skor"] = "-"
+                if i < len(modern_results['final_ids']):
+                    row["Modern Doc ID"] = modern_results['final_ids'][i]
+                    row["Modern Skor"] = f"{modern_results['final_scores'][i]:.4f}"
+                else:
+                    row["Modern Doc ID"] = "-"
+                    row["Modern Skor"] = "-"
+                comparison_data.append(row)
+            st.dataframe(pd.DataFrame(comparison_data), use_container_width=True, hide_index=True)
 
 
 # ----------------------------------------------------------
