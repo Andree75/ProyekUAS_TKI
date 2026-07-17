@@ -21,7 +21,8 @@ from src.reranker import CrossEncoderReranker
 from src.evaluation import (
     calculate_all_metrics, calculate_modern_metrics,
     calculate_mrr, calculate_average_ndcg,
-    calculate_rr, calculate_ndcg
+    calculate_rr, calculate_ndcg,
+    calculate_precision, calculate_recall
 )
 
 
@@ -425,77 +426,68 @@ with tab2:
 # ----------------------------------------------------------
 with tab3:
     st.markdown("### Evaluasi Komparatif: Baseline VSM vs Two-Stage Retrieval")
-    st.markdown("""
-    <div class="report-card">
-        <b>Mekanisme Evaluasi:</b><br>
-        1. Tentukan minimal 5 skenario kueri uji.<br>
-        2. Untuk setiap kueri, tentukan <i>Ground Truth</i> (ID dokumen yang benar-benar relevan).<br>
-        3. Jalankan kedua sistem pada kueri yang sama.<br>
-        4. Hitung metrik <b>MRR</b> dan <b>NDCG</b> untuk masing-masing sistem.<br>
-        5. Bandingkan hasilnya secara kuantitatif.
-    </div>
-    """, unsafe_allow_html=True)
 
-    # --- Definisi Skenario Evaluasi ---
-    st.subheader("Definisi Skenario Kueri & Ground Truth")
-    st.caption("Masukkan minimal 5 kueri uji. Untuk setiap kueri, tentukan ID dokumen relevan (ground truth).")
-
-    num_scenarios = st.number_input("Jumlah Skenario Kueri:", min_value=5, max_value=10, value=5, step=1)
-    
-    # Default kueri dan ground truth untuk contoh awal
-    default_queries = [
-        "harga beras murah", 
-        "stabilitas pasokan pangan",
-        "kemenko pangan kebijakan",
-        "stok beras aman",
-        "petani kesejahteraan rakyat",
-    ]
-    default_gts = ["26, 41", "3, 4", "3, 7, 8, 47", "2, 5, 8, 9", "0, 6"]
-
-    scenarios = []
-    for i in range(num_scenarios):
-        col_q, col_gt = st.columns([2, 1])
-        default_q = default_queries[i] if i < len(default_queries) else ""
-        default_gt = default_gts[i] if i < len(default_gts) else ""
-        with col_q:
-            q = st.text_input(f"Kueri Skenario {i+1}:", value=default_q, key=f"eval_q_{i}")
-        with col_gt:
-            gt = st.text_input(f"Ground Truth {i+1} (ID, pisah koma):", value=default_gt, key=f"eval_gt_{i}")
-        scenarios.append((q, gt))
+    eval_mode = st.radio(
+        "Pilih Mode Evaluasi:",
+        ["📋 Evaluasi 5 Kueri Riset (Otomatis)", "🧪 Uji Kueri Kustom (Interaktif)"],
+        horizontal=True,
+        key="eval_mode_radio"
+    )
 
     st.markdown("---")
 
-    # --- Tombol Jalankan Evaluasi ---
-    if st.button("🚀 Jalankan Evaluasi Komparatif", use_container_width=True):
-        valid_scenarios = [
-            (q, gt) for q, gt in scenarios 
-            if q.strip() and gt.strip()
+    # ==========================================
+    # MODE 1: EVALUASI 5 KUERI RISET (TETAP)
+    # ==========================================
+    if eval_mode == "📋 Evaluasi 5 Kueri Riset (Otomatis)":
+        st.markdown("""
+        <div class="report-card">
+            <b>Evaluasi Otomatis — 5 Skenario Kueri Riset</b><br>
+            Evaluasi ini menggunakan 5 kueri uji beserta <i>Ground Truth</i> yang telah ditentukan
+            secara manual dalam metodologi penelitian. Ground Truth bersifat tetap dan tidak dapat diubah
+            karena merupakan bagian dari desain eksperimen.<br><br>
+            Klik tombol di bawah untuk menjalankan evaluasi otomatis.
+        </div>
+        """, unsafe_allow_html=True)
+
+        EVAL_SCENARIOS = [
+            {"query": "harga beras murah", "gt": [26, 41]},
+            {"query": "stabilitas pasokan pangan", "gt": [3, 4]},
+            {"query": "kemenko pangan kebijakan", "gt": [3, 7, 8, 47]},
+            {"query": "stok beras aman", "gt": [2, 5, 8, 9]},
+            {"query": "petani kesejahteraan rakyat", "gt": [0, 6]},
         ]
 
-        if len(valid_scenarios) < 5:
-            st.error("Minimal 5 skenario kueri dengan ground truth yang valid diperlukan.")
-        else:
+        st.markdown("#### Skenario Kueri & Ground Truth")
+        scenario_display = []
+        for i, s in enumerate(EVAL_SCENARIOS, 1):
+            scenario_display.append({
+                "No": f"Q{i}",
+                "Kueri": s["query"],
+                "Ground Truth (ID Dokumen)": str(s["gt"]),
+                "Jumlah Dok. Relevan": len(s["gt"]),
+            })
+        st.dataframe(pd.DataFrame(scenario_display), use_container_width=True, hide_index=True)
+
+        if st.button("🚀 Jalankan Evaluasi 5 Kueri Riset", use_container_width=True, key="btn_static_eval"):
             with st.spinner("⏳ Menjalankan evaluasi pada kedua sistem..."):
-                # Kumpulkan hasil kedua sistem
                 all_baseline_retrieved = []
                 all_modern_retrieved = []
                 all_ground_truths = []
                 detail_rows = []
 
-                for i, (q, gt_str) in enumerate(valid_scenarios, 1):
-                    gt_ids = [int(x.strip()) for x in gt_str.split(',') if x.strip().isdigit()]
+                for i, scenario in enumerate(EVAL_SCENARIOS, 1):
+                    q = scenario["query"]
+                    gt_ids = scenario["gt"]
                     all_ground_truths.append(gt_ids)
 
-                    # Baseline
                     b_ids, b_scores = search_baseline(q, top_k=5)
                     all_baseline_retrieved.append(b_ids)
 
-                    # Modern
                     m_results = search_modern(q, top_k_stage1=15, top_k_final=5)
                     m_ids = m_results['final_ids']
                     all_modern_retrieved.append(m_ids)
 
-                    # Metrik per kueri
                     b_metrics = calculate_modern_metrics(b_ids, gt_ids, k=5)
                     m_metrics = calculate_modern_metrics(m_ids, gt_ids, k=5)
 
@@ -509,45 +501,55 @@ with tab3:
                         "Modern NDCG@5": f"{m_metrics['ndcg']:.4f}",
                     })
 
-                # Hitung MRR dan Avg NDCG keseluruhan
                 baseline_mrr = calculate_mrr(all_baseline_retrieved, all_ground_truths)
                 modern_mrr = calculate_mrr(all_modern_retrieved, all_ground_truths)
                 baseline_ndcg = calculate_average_ndcg(all_baseline_retrieved, all_ground_truths, k=5)
                 modern_ndcg = calculate_average_ndcg(all_modern_retrieved, all_ground_truths, k=5)
 
-            # --- Tampilkan Hasil ---
+            st.session_state['eval_static'] = {
+                'detail_rows': detail_rows,
+                'baseline_mrr': baseline_mrr,
+                'modern_mrr': modern_mrr,
+                'baseline_ndcg': baseline_ndcg,
+                'modern_ndcg': modern_ndcg,
+            }
+
+        if 'eval_static' in st.session_state:
+            r = st.session_state['eval_static']
+
             st.markdown("#### Detail Evaluasi Per Kueri")
-            st.dataframe(pd.DataFrame(detail_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(r['detail_rows']), use_container_width=True, hide_index=True)
 
             st.markdown("---")
             st.markdown("#### Ringkasan Metrik Keseluruhan")
 
-            col_m1, col_m2 = st.columns(2)
-            with col_m1:
-                st.metric(label="🟢 Baseline MRR", value=f"{baseline_mrr:.4f}")
-                st.metric(label="🟢 Baseline Avg NDCG@5", value=f"{baseline_ndcg:.4f}")
-            with col_m2:
-                mrr_delta = modern_mrr - baseline_mrr
-                ndcg_delta = modern_ndcg - baseline_ndcg
-                st.metric(label="🔵 Modern MRR", value=f"{modern_mrr:.4f}", delta=f"{mrr_delta:+.4f}")
-                st.metric(label="🔵 Modern Avg NDCG@5", value=f"{modern_ndcg:.4f}", delta=f"{ndcg_delta:+.4f}")
+            col1, col2 = st.columns(2)
+            with col1:
+                st.metric("🟢 Baseline MRR", f"{r['baseline_mrr']:.4f}")
+                st.metric("🟢 Baseline Avg NDCG@5", f"{r['baseline_ndcg']:.4f}")
+            with col2:
+                mrr_d = r['modern_mrr'] - r['baseline_mrr']
+                ndcg_d = r['modern_ndcg'] - r['baseline_ndcg']
+                st.metric("🔵 Modern MRR", f"{r['modern_mrr']:.4f}", delta=f"{mrr_d:+.4f}")
+                st.metric("🔵 Modern Avg NDCG@5", f"{r['modern_ndcg']:.4f}", delta=f"{ndcg_d:+.4f}")
 
-            # Kesimpulan otomatis
             st.markdown("---")
             st.markdown("#### Kesimpulan Evaluasi")
-            if modern_mrr > baseline_mrr and modern_ndcg > baseline_ndcg:
+            mrr_d = r['modern_mrr'] - r['baseline_mrr']
+            ndcg_d = r['modern_ndcg'] - r['baseline_ndcg']
+            if r['modern_mrr'] > r['baseline_mrr'] and r['modern_ndcg'] > r['baseline_ndcg']:
                 st.success(
                     f"✅ **Sistem Modern (Two-Stage Retrieval) mengungguli Baseline VSM** pada kedua metrik. "
-                    f"MRR meningkat **{mrr_delta:+.4f}** dan NDCG@5 meningkat **{ndcg_delta:+.4f}**. "
+                    f"MRR meningkat **{mrr_d:+.4f}** dan NDCG@5 meningkat **{ndcg_d:+.4f}**. "
                     f"Hal ini membuktikan bahwa pendekatan Semantic Search dengan Bi-Encoder IndoBERT "
                     f"dan Reranking Cross-Encoder berhasil mengatasi masalah *vocabulary mismatch* "
                     f"pada metode TF-IDF tradisional."
                 )
-            elif modern_mrr > baseline_mrr or modern_ndcg > baseline_ndcg:
+            elif r['modern_mrr'] > r['baseline_mrr'] or r['modern_ndcg'] > r['baseline_ndcg']:
                 st.info(
                     f"⚠️ **Sistem Modern mengungguli Baseline pada sebagian metrik.** "
-                    f"MRR: {baseline_mrr:.4f} → {modern_mrr:.4f} ({mrr_delta:+.4f}). "
-                    f"NDCG@5: {baseline_ndcg:.4f} → {modern_ndcg:.4f} ({ndcg_delta:+.4f}). "
+                    f"MRR: {r['baseline_mrr']:.4f} → {r['modern_mrr']:.4f} ({mrr_d:+.4f}). "
+                    f"NDCG@5: {r['baseline_ndcg']:.4f} → {r['modern_ndcg']:.4f} ({ndcg_d:+.4f}). "
                     f"Perlu analisis lebih lanjut terhadap skenario kueri dan kualitas ground truth."
                 )
             else:
@@ -557,3 +559,273 @@ with tab3:
                     f"atau dataset terlalu kecil (50 dokumen) sehingga TF-IDF masih cukup efektif. "
                     f"Disarankan untuk memperbanyak kueri uji dan memperbaiki anotasi ground truth."
                 )
+
+    # ==========================================
+    # MODE 2: UJI KUERI KUSTOM (INTERAKTIF)
+    # ==========================================
+    else:
+        st.markdown("""
+        <div class="report-card">
+            <b>Mode Interaktif — Uji Kueri Kustom (Adjudication System)</b><br>
+            Masukkan kueri pencarian baru. Sistem akan menjalankan kedua metode pencarian,
+            lalu menampilkan dokumen-dokumen yang ditemukan.<br><br>
+            <b>Cara Penggunaan:</b><br>
+            1. Ketik kueri pencarian pada kolom di bawah.<br>
+            2. Baca setiap dokumen hasil pencarian yang muncul.<br>
+            3. <b>Centang</b> dokumen yang menurut Anda relevan dengan kueri tersebut.<br>
+            4. Klik tombol <b>"Hitung Evaluasi"</b> untuk melihat perbandingan metrik.<br><br>
+            <i>Mode ini memungkinkan penguji untuk menilai relevansi dokumen secara langsung
+            tanpa perlu menghafal seluruh isi dataset.</i>
+        </div>
+        """, unsafe_allow_html=True)
+
+        custom_query = st.text_input(
+            "Masukkan Kueri Baru untuk Diuji:",
+            placeholder="Contoh: kebijakan bantuan untuk petani",
+            key="custom_eval_query"
+        )
+
+        if custom_query:
+            # Cache search results to avoid re-running model on every interaction
+            cache_key = '_custom_search_cache'
+            if (cache_key not in st.session_state or
+                st.session_state[cache_key].get('query') != custom_query):
+                with st.spinner("🔄 Menjalankan pencarian pada kedua sistem..."):
+                    _b_ids, _b_scores = search_baseline(custom_query, top_k=5)
+                    _m_results = search_modern(custom_query, top_k_stage1=15, top_k_final=5)
+                    st.session_state[cache_key] = {
+                        'query': custom_query,
+                        'b_ids': _b_ids,
+                        'b_scores': _b_scores,
+                        'm_ids': _m_results['final_ids'],
+                        'm_scores': _m_results['final_scores'],
+                    }
+
+            cached = st.session_state[cache_key]
+            b_ids = cached['b_ids']
+            b_scores = cached['b_scores']
+            m_ids = cached['m_ids']
+            m_scores = cached['m_scores']
+
+            # Collect unique document IDs from both systems (preserve order)
+            all_candidate_ids = list(dict.fromkeys(b_ids + m_ids))
+
+            st.markdown("---")
+            st.markdown("#### 📝 Langkah 1: Tentukan Ground Truth")
+
+            gt_input_method = st.radio(
+                "Pilih Metode Penentuan Ground Truth:",
+                ["☑️ Centang dari Hasil Pencarian (Rekomendasi)", "✍️ Masukkan ID Dokumen secara Manual"],
+                horizontal=True,
+                key="gt_input_method_radio"
+            )
+
+            if gt_input_method == "☑️ Centang dari Hasil Pencarian (Rekomendasi)":
+                st.caption(
+                    f"Ditemukan {len(all_candidate_ids)} dokumen unik dari kedua sistem. "
+                    f"Baca setiap dokumen, lalu centang jika relevan dengan kueri \"{custom_query}\"."
+                )
+
+                # Form-based adjudication (prevents page rerun on every checkbox toggle)
+                with st.form("adjudication_form"):
+                    for doc_id in all_candidate_ids:
+                        teks = df['Komentar'].iloc[doc_id]
+                        source_tags = []
+                        if doc_id in b_ids:
+                            source_tags.append("🟢 Ditemukan oleh Baseline")
+                        if doc_id in m_ids:
+                            source_tags.append("🔵 Ditemukan oleh Modern")
+                        source_str = " | ".join(source_tags)
+
+                        st.markdown(f"""
+                        <div style="background: var(--secondary-background-color); padding: 15px; border-radius: 10px;
+                                    border-left: 5px solid rgba(128,128,128,0.3); margin-bottom: 4px;">
+                            <div style="display: flex; justify-content: space-between; align-items: center;">
+                                <b>Dokumen ID: {doc_id}</b>
+                                <span style="font-size: 0.8em; opacity: 0.6;">{source_str}</span>
+                            </div>
+                            <p style="margin: 8px 0; font-size: 1.0em; line-height: 1.5;">"{teks}"</p>
+                        </div>
+                        """, unsafe_allow_html=True)
+                        st.checkbox(
+                            f"✅ Tandai Dokumen {doc_id} sebagai RELEVAN",
+                            key=f"adj_{custom_query}_{doc_id}",
+                        )
+
+                    submitted = st.form_submit_button(
+                        "📊 Hitung Evaluasi Berdasarkan Penilaian Anda",
+                        use_container_width=True
+                    )
+
+                if submitted:
+                    gt_ids_custom = [
+                        doc_id for doc_id in all_candidate_ids
+                        if st.session_state.get(f"adj_{custom_query}_{doc_id}", False)
+                    ]
+                    if not gt_ids_custom:
+                        st.error("⚠️ Anda belum mencentang dokumen relevan manapun. Centang minimal 1 dokumen.")
+                    else:
+                        st.session_state['custom_eval_done'] = {
+                            'query': custom_query,
+                            'gt_ids': gt_ids_custom,
+                            'b_ids': b_ids,
+                            'b_scores': b_scores,
+                            'm_ids': m_ids,
+                            'm_scores': m_scores,
+                        }
+            else:
+                # Manual entry method
+                st.caption(
+                    "Masukkan ID dokumen yang menurut Anda relevan secara manual. "
+                    f"Dataset Anda berisi dokumen dengan ID 0 sampai {len(df)-1}."
+                )
+
+                with st.form("manual_gt_form"):
+                    gt_manual_input = st.text_input(
+                        "Masukkan ID Ground Truth (pisahkan dengan koma, contoh: 26, 41):",
+                        placeholder="Contoh: 26, 41",
+                        key="gt_manual_input_val"
+                    )
+
+                    submitted_manual = st.form_submit_button(
+                        "📊 Hitung Evaluasi Berdasarkan ID Manual",
+                        use_container_width=True
+                    )
+
+                if submitted_manual:
+                    if not gt_manual_input.strip():
+                        st.error("⚠️ Silakan masukkan minimal satu ID dokumen.")
+                    else:
+                        parsed_ids = []
+                        invalid_tokens = []
+                        out_of_bounds = []
+
+                        tokens = [x.strip() for x in gt_manual_input.split(',') if x.strip()]
+                        for t in tokens:
+                            if t.isdigit():
+                                val = int(t)
+                                if 0 <= val < len(df):
+                                    parsed_ids.append(val)
+                                else:
+                                    out_of_bounds.append(val)
+                            else:
+                                invalid_tokens.append(t)
+
+                        if invalid_tokens:
+                            st.error(f"❌ Input tidak valid: {', '.join(invalid_tokens)}. Harap masukkan angka saja.")
+                        elif out_of_bounds:
+                            st.error(f"❌ ID dokumen di luar jangkauan: {', '.join(map(str, out_of_bounds))}. Dataset hanya berisi ID 0 sampai {len(df)-1}.")
+                        elif not parsed_ids:
+                            st.error("⚠️ Tidak ada ID dokumen valid yang terdeteksi.")
+                        else:
+                            st.session_state['custom_eval_done'] = {
+                                'query': custom_query,
+                                'gt_ids': parsed_ids,
+                                'b_ids': b_ids,
+                                'b_scores': b_scores,
+                                'm_ids': m_ids,
+                                'm_scores': m_scores,
+                            }
+
+            # Display results if evaluation has been performed for this query
+            if ('custom_eval_done' in st.session_state and
+                st.session_state['custom_eval_done']['query'] == custom_query):
+                res = st.session_state['custom_eval_done']
+                gt = res['gt_ids']
+
+                st.markdown("---")
+                st.markdown("#### 📊 Langkah 2: Hasil Perbandingan Evaluasi")
+                st.success(
+                    f"**Ground Truth Anda:** Dokumen ID **{gt}** — "
+                    f"Total {len(gt)} dokumen relevan"
+                )
+
+                col_b, col_m = st.columns(2)
+
+                with col_b:
+                    st.markdown("##### 🟢 Baseline VSM (TF-IDF)")
+                    if not res['b_ids']:
+                        st.warning("Tidak ada hasil pencarian.")
+                    else:
+                        for rank, (idx, score) in enumerate(zip(res['b_ids'], res['b_scores']), 1):
+                            teks = df['Komentar'].iloc[idx]
+                            is_rel = idx in gt
+                            rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
+                            border_color = "#4CAF50" if is_rel else "#f44336"
+                            st.markdown(f"""
+                                <div style="background: var(--secondary-background-color); padding: 12px;
+                                            border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <b style="color: var(--primary-light);">#{rank} | Doc {idx}</b>
+                                        <span class="score-badge">{score:.4f}</span>
+                                    </div>
+                                    <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
+                                    <b style="font-size: 0.85em;">{rel_icon}</b>
+                                </div>
+                            """, unsafe_allow_html=True)
+
+                with col_m:
+                    st.markdown("##### 🔵 Modern Two-Stage")
+                    if not res['m_ids']:
+                        st.warning("Tidak ada hasil pencarian.")
+                    else:
+                        for rank, (idx, score) in enumerate(zip(res['m_ids'], res['m_scores']), 1):
+                            teks = df['Komentar'].iloc[idx]
+                            is_rel = idx in gt
+                            rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
+                            border_color = "#42A5F5" if is_rel else "#f44336"
+                            st.markdown(f"""
+                                <div style="background: var(--secondary-background-color); padding: 12px;
+                                            border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
+                                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                                        <b style="color: var(--accent-blue-light);">#{rank} | Doc {idx}</b>
+                                        <span class="score-badge-blue">{score:.4f}</span>
+                                    </div>
+                                    <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
+                                    <b style="font-size: 0.85em;">{rel_icon}</b>
+                                </div>
+                            """, unsafe_allow_html=True)
+
+                # Metrics comparison
+                st.markdown("---")
+                st.markdown("#### 📈 Metrik Evaluasi untuk Kueri Ini")
+
+                b_prec = calculate_precision(res['b_ids'], gt)
+                b_rec = calculate_recall(res['b_ids'], gt)
+                b_met = calculate_modern_metrics(res['b_ids'], gt, k=5)
+                m_prec = calculate_precision(res['m_ids'], gt)
+                m_rec = calculate_recall(res['m_ids'], gt)
+                m_met = calculate_modern_metrics(res['m_ids'], gt, k=5)
+
+                col_met1, col_met2 = st.columns(2)
+                with col_met1:
+                    st.markdown("**🟢 Baseline VSM**")
+                    st.metric("Precision", f"{b_prec:.2%}")
+                    st.metric("Recall", f"{b_rec:.2%}")
+                    st.metric("Reciprocal Rank", f"{b_met['rr']:.4f}")
+                    st.metric("NDCG@5", f"{b_met['ndcg']:.4f}")
+                with col_met2:
+                    st.markdown("**🔵 Modern Two-Stage**")
+                    st.metric("Precision", f"{m_prec:.2%}", delta=f"{m_prec - b_prec:+.2%}")
+                    st.metric("Recall", f"{m_rec:.2%}", delta=f"{m_rec - b_rec:+.2%}")
+                    st.metric("Reciprocal Rank", f"{m_met['rr']:.4f}", delta=f"{m_met['rr'] - b_met['rr']:+.4f}")
+                    st.metric("NDCG@5", f"{m_met['ndcg']:.4f}", delta=f"{m_met['ndcg'] - b_met['ndcg']:+.4f}")
+
+                # Conclusion for this query
+                st.markdown("---")
+                if m_met['ndcg'] > b_met['ndcg'] and m_prec >= b_prec:
+                    st.success(
+                        f"✅ **Sistem Modern lebih unggul** untuk kueri \"{custom_query}\". "
+                        f"Modern berhasil menempatkan lebih banyak dokumen relevan di peringkat atas."
+                    )
+                elif m_met['ndcg'] < b_met['ndcg']:
+                    st.warning(
+                        f"⚠️ **Baseline VSM lebih unggul** untuk kueri \"{custom_query}\". "
+                        f"Kemungkinan kata kunci kueri ini muncul secara eksplisit di dokumen relevan, "
+                        f"sehingga TF-IDF sudah cukup efektif."
+                    )
+                else:
+                    st.info(
+                        f"ℹ️ **Kedua sistem menunjukkan performa setara** untuk kueri \"{custom_query}\"."
+                    )
+
