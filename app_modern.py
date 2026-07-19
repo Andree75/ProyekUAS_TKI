@@ -672,6 +672,7 @@ with tab3:
                             'b_scores': b_scores,
                             'm_ids': m_ids,
                             'm_scores': m_scores,
+                            'method': 'checkbox'
                         }
             else:
                 # Manual entry method
@@ -680,57 +681,60 @@ with tab3:
                     f"Dataset Anda berisi dokumen dengan ID 0 sampai {len(df)-1}."
                 )
 
-                with st.form("manual_gt_form"):
-                    gt_manual_input = st.text_input(
-                        "Masukkan ID Ground Truth (pisahkan dengan koma, contoh: 26, 41):",
-                        placeholder="Contoh: 26, 41",
-                        key="gt_manual_input_val"
-                    )
+                gt_manual_input = st.text_input(
+                    "Masukkan ID Ground Truth (pisahkan dengan koma, contoh: 26, 41):",
+                    placeholder="Contoh: 26, 41",
+                    key="gt_manual_input_val"
+                )
 
-                    submitted_manual = st.form_submit_button(
-                        "📊 Hitung Evaluasi Berdasarkan ID Manual",
-                        use_container_width=True
-                    )
+                if gt_manual_input.strip():
+                    parsed_ids = []
+                    invalid_tokens = []
+                    out_of_bounds = []
 
-                if submitted_manual:
-                    if not gt_manual_input.strip():
-                        st.error("⚠️ Silakan masukkan minimal satu ID dokumen.")
-                    else:
-                        parsed_ids = []
-                        invalid_tokens = []
-                        out_of_bounds = []
-
-                        tokens = [x.strip() for x in gt_manual_input.split(',') if x.strip()]
-                        for t in tokens:
-                            if t.isdigit():
-                                val = int(t)
-                                if 0 <= val < len(df):
-                                    parsed_ids.append(val)
-                                else:
-                                    out_of_bounds.append(val)
+                    tokens = [x.strip() for x in gt_manual_input.split(',') if x.strip()]
+                    for t in tokens:
+                        if t.isdigit():
+                            val = int(t)
+                            if 0 <= val < len(df):
+                                parsed_ids.append(val)
                             else:
-                                invalid_tokens.append(t)
-
-                        if invalid_tokens:
-                            st.error(f"❌ Input tidak valid: {', '.join(invalid_tokens)}. Harap masukkan angka saja.")
-                        elif out_of_bounds:
-                            st.error(f"❌ ID dokumen di luar jangkauan: {', '.join(map(str, out_of_bounds))}. Dataset hanya berisi ID 0 sampai {len(df)-1}.")
-                        elif not parsed_ids:
-                            st.error("⚠️ Tidak ada ID dokumen valid yang terdeteksi.")
+                                out_of_bounds.append(val)
                         else:
-                            st.session_state['custom_eval_done'] = {
-                                'query': custom_query,
-                                'gt_ids': parsed_ids,
-                                'b_ids': b_ids,
-                                'b_scores': b_scores,
-                                'm_ids': m_ids,
-                                'm_scores': m_scores,
-                            }
+                            invalid_tokens.append(t)
+
+                    if invalid_tokens:
+                        st.error(f"❌ Input tidak valid: {', '.join(invalid_tokens)}. Harap masukkan angka saja.")
+                        st.session_state['custom_eval_done'] = None
+                    elif out_of_bounds:
+                        st.error(f"❌ ID dokumen di luar jangkauan: {', '.join(map(str, out_of_bounds))}. Dataset hanya berisi ID 0 sampai {len(df)-1}.")
+                        st.session_state['custom_eval_done'] = None
+                    elif not parsed_ids:
+                        st.error("⚠️ Tidak ada ID dokumen valid yang terdeteksi.")
+                        st.session_state['custom_eval_done'] = None
+                    else:
+                        st.session_state['custom_eval_done'] = {
+                            'query': custom_query,
+                            'gt_ids': parsed_ids,
+                            'b_ids': b_ids,
+                            'b_scores': b_scores,
+                            'm_ids': m_ids,
+                            'm_scores': m_scores,
+                            'method': 'manual'
+                        }
+                else:
+                    st.info("⚠️ Silakan masukkan minimal satu ID dokumen untuk melihat hasil perbandingan evaluasi.")
+                    st.session_state['custom_eval_done'] = None
 
             # Display results if evaluation has been performed for this query
-            if ('custom_eval_done' in st.session_state and
-                st.session_state['custom_eval_done']['query'] == custom_query):
-                res = st.session_state['custom_eval_done']
+            eval_data = st.session_state.get('custom_eval_done')
+            current_method = "checkbox" if gt_input_method == "☑️ Centang dari Hasil Pencarian (Rekomendasi)" else "manual"
+
+            if (eval_data is not None and 
+                eval_data.get('query') == custom_query and 
+                eval_data.get('method', 'checkbox') == current_method):
+                
+                res = eval_data
                 gt = res['gt_ids']
 
                 st.markdown("---")
@@ -744,47 +748,101 @@ with tab3:
 
                 with col_b:
                     st.markdown("##### 🟢 Baseline VSM (TF-IDF)")
-                    if not res['b_ids']:
-                        st.warning("Tidak ada hasil pencarian.")
-                    else:
-                        for rank, (idx, score) in enumerate(zip(res['b_ids'], res['b_scores']), 1):
+                    if current_method == "manual":
+                        for idx in gt:
                             teks = df['Komentar'].iloc[idx]
-                            is_rel = idx in gt
-                            rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
-                            border_color = "#4CAF50" if is_rel else "#f44336"
+                            if idx in res['b_ids']:
+                                rank = res['b_ids'].index(idx) + 1
+                                score = res['b_scores'][rank - 1]
+                                status_text = f"Ditemukan di Rank #{rank}"
+                                rel_icon = "✅ DITEMUKAN"
+                                border_color = "#4CAF50"
+                            else:
+                                score = 0.0
+                                status_text = "TIDAK DITEMUKAN"
+                                rel_icon = "❌ TIDAK DITEMUKAN"
+                                border_color = "#f44336"
+                                
                             st.markdown(f"""
                                 <div style="background: var(--secondary-background-color); padding: 12px;
                                             border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
                                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <b style="color: var(--primary-light);">#{rank} | Doc {idx}</b>
+                                        <b style="color: var(--primary-light);">Doc {idx} | {status_text}</b>
                                         <span class="score-badge">{score:.4f}</span>
                                     </div>
                                     <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
                                     <b style="font-size: 0.85em;">{rel_icon}</b>
                                 </div>
                             """, unsafe_allow_html=True)
+                    else:
+                        if not res['b_ids']:
+                            st.warning("Tidak ada hasil pencarian.")
+                        else:
+                            for rank, (idx, score) in enumerate(zip(res['b_ids'], res['b_scores']), 1):
+                                teks = df['Komentar'].iloc[idx]
+                                is_rel = idx in gt
+                                rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
+                                border_color = "#4CAF50" if is_rel else "#f44336"
+                                st.markdown(f"""
+                                    <div style="background: var(--secondary-background-color); padding: 12px;
+                                                border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <b style="color: var(--primary-light);">#{rank} | Doc {idx}</b>
+                                            <span class="score-badge">{score:.4f}</span>
+                                        </div>
+                                        <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
+                                        <b style="font-size: 0.85em;">{rel_icon}</b>
+                                    </div>
+                                """, unsafe_allow_html=True)
 
                 with col_m:
                     st.markdown("##### 🔵 Modern Two-Stage")
-                    if not res['m_ids']:
-                        st.warning("Tidak ada hasil pencarian.")
-                    else:
-                        for rank, (idx, score) in enumerate(zip(res['m_ids'], res['m_scores']), 1):
+                    if current_method == "manual":
+                        for idx in gt:
                             teks = df['Komentar'].iloc[idx]
-                            is_rel = idx in gt
-                            rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
-                            border_color = "#42A5F5" if is_rel else "#f44336"
+                            if idx in res['m_ids']:
+                                rank = res['m_ids'].index(idx) + 1
+                                score = res['m_scores'][rank - 1]
+                                status_text = f"Ditemukan di Rank #{rank}"
+                                rel_icon = "✅ DITEMUKAN"
+                                border_color = "#42A5F5"
+                            else:
+                                score = 0.0
+                                status_text = "TIDAK DITEMUKAN"
+                                rel_icon = "❌ TIDAK DITEMUKAN"
+                                border_color = "#f44336"
+                                
                             st.markdown(f"""
                                 <div style="background: var(--secondary-background-color); padding: 12px;
                                             border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
                                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                                        <b style="color: var(--accent-blue-light);">#{rank} | Doc {idx}</b>
+                                        <b style="color: var(--accent-blue-light);">Doc {idx} | {status_text}</b>
                                         <span class="score-badge-blue">{score:.4f}</span>
                                     </div>
                                     <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
                                     <b style="font-size: 0.85em;">{rel_icon}</b>
                                 </div>
                             """, unsafe_allow_html=True)
+                    else:
+                        if not res['m_ids']:
+                            st.warning("Tidak ada hasil pencarian.")
+                        else:
+                            for rank, (idx, score) in enumerate(zip(res['m_ids'], res['m_scores']), 1):
+                                teks = df['Komentar'].iloc[idx]
+                                is_rel = idx in gt
+                                rel_icon = "✅ RELEVAN" if is_rel else "❌ TIDAK RELEVAN"
+                                border_color = "#42A5F5" if is_rel else "#f44336"
+                                st.markdown(f"""
+                                    <div style="background: var(--secondary-background-color); padding: 12px;
+                                                border-radius: 10px; border-left: 5px solid {border_color}; margin-bottom: 8px;">
+                                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                                            <b style="color: var(--accent-blue-light);">#{rank} | Doc {idx}</b>
+                                            <span class="score-badge-blue">{score:.4f}</span>
+                                        </div>
+                                        <p style="font-size: 0.9em; margin: 6px 0; line-height: 1.4;">"{teks}"</p>
+                                        <b style="font-size: 0.85em;">{rel_icon}</b>
+                                    </div>
+                                """, unsafe_allow_html=True)
 
                 # Metrics comparison
                 st.markdown("---")
